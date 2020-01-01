@@ -1,11 +1,5 @@
 # [START gae_python37_app]
 
-try:
-  import googleclouddebugger
-  googleclouddebugger.enable()
-except ImportError:
-  pass
-
 from flask import Flask
 #from flask import send_file
 
