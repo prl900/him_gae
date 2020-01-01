@@ -1,0 +1,5 @@
+cron:
+- description: "update himawari image"
+  target: pywald
+  url: /update
+  schedule: every 1 minutes
