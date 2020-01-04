@@ -15,6 +15,7 @@ import ftplib
 #import satpy
 
 from google.cloud import storage
+from google.cloud import datastore
 
 # If `entrypoint` is not defined in app.yaml, App Engine will look for an app
 # called `app` in `main.py`.
@@ -24,14 +25,34 @@ storage_client = storage.Client()
 bucket_name = os.environ['BUCKET_NAME']
 bucket = storage_client.get_bucket(bucket_name)
 
+datastore_client = datastore.Client(os.environ['PROJ_ID'])
+
+def add_entry(client, start, name):
+    key = client.key('Image')
+
+    im = datastore.Entity(key, exclude_from_indexes=['name'])
+
+    im.update({
+        'received': datetime.utcnow(),
+        'im_start': start,
+        'name': name,
+    })
+
+    client.put(im)
+
+    return im.key
+
 @app.route('/')
 def entry():
     return 'Welcome to the Himawari8 GAE process pipeline' 
 
 @app.route('/update')
 def proc():
-    ftp = ftplib.FTP("ftp.ptree.jaxa.jp") 
-    ftp.login(os.environ['USER'], os.environ['PSWD'])
+    try:
+        ftp = ftplib.FTP("ftp.ptree.jaxa.jp") 
+        ftp.login(os.environ['USER'], os.environ['PSWD'])
+    except:
+        return 'failed'
 
     now = datetime.utcnow()
     rnow = datetime(now.year, now.month, now.day, now.hour, (now.minute//10)*10, tzinfo=pytz.utc)
@@ -53,6 +74,7 @@ def proc():
             b.seek(0)
             blob.upload_from_string(bz2.decompress(b.read()), content_type='application/binary')
             b.close()
+            add_entry(datastore_client, d, fname[:-4])
         except:
             continue
 
