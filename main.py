@@ -9,6 +9,7 @@ import pytz
 import io
 import os
 import bz2
+import json
 
 import ftplib
 #import imageio
@@ -40,7 +41,17 @@ def add_entry(client, start, name):
 
     client.put(im)
 
-    return im.key
+    key = client.key('Task', 'sample_task')
+    client.delete(key)
+
+    # Delete entries older than 48 hours
+    query = client.query(kind='Image')
+    query.add_filter('received', '<', datetime.utcnow() - timedelta(seconds=48*60*60))
+    keys = list([entity.key for entity in query.fetch()])
+    client.delete_multi(keys)
+
+    return None
+
 
 @app.route('/')
 def entry():
@@ -77,7 +88,7 @@ def proc():
             add_entry(datastore_client, d, fname[:-4])
         except:
             continue
-
+    
     ftp.quit()
     
     #delete older than 60 minutes
@@ -89,6 +100,15 @@ def proc():
             blb.delete()
 
     return 'ok'
+
+
+@app.route('/stats')
+def stats():
+    query = datastore_client.query(kind='Image')
+    query.order = ['im_start']
+    keys = list([dict(entity) for entity in query.fetch()])
+
+    return json.dumps(keys, indent=4, sort_keys=True, default=str)
 
 """
 @app.route('/show')
