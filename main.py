@@ -17,6 +17,7 @@ import ftplib
 
 from google.cloud import storage
 from google.cloud import datastore
+from google.cloud import pubsub_v1 as pubsub
 
 # If `entrypoint` is not defined in app.yaml, App Engine will look for an app
 # called `app` in `main.py`.
@@ -27,6 +28,9 @@ bucket_name = os.environ['BUCKET_NAME']
 bucket = storage_client.get_bucket(bucket_name)
 
 datastore_client = datastore.Client(os.environ['PROJ_ID'])
+
+publisher = pubsub.PublisherClient()
+topic = 'projects/{}/topics/{}'.format(os.environ['PROJ_ID'], os.environ['TOPIC'])
 
 def add_entry(client, start, name):
     key = client.key('Image')
@@ -86,8 +90,12 @@ def proc():
             blob.upload_from_string(bz2.decompress(b.read()), content_type='application/binary')
             b.close()
             add_entry(datastore_client, d, fname[:-4])
+            #publisher.publish(topic, data=b'My awesome message.')
         except:
             continue
+        msg = '{{"data":"himawari8/{}", "publishTime": {}}}'.format(fname[:-4], d.strftime("%Y%m%dT%H%M"))
+        publisher.publish(topic, data=msg.encode("utf-8"))
+    
     
     ftp.quit()
     
