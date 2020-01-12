@@ -6,6 +6,7 @@ from flask import Flask
 from datetime import datetime
 from datetime import timedelta
 import pytz
+import base64
 import io
 import os
 import bz2
@@ -93,8 +94,8 @@ def proc():
             #publisher.publish(topic, data=b'My awesome message.')
         except:
             continue
-        msg = '{{"data":"himawari8/{}", "publishTime": {}}}'.format(fname[:-4], d.strftime("%Y%m%dT%H%M"))
-        publisher.publish(topic, data=msg.encode("utf-8"))
+        #msg = '{{"data":"{}", "publishTime": "{}"}}'.format(, d.isoformat("T") + "Z")
+        publisher.publish(topic, data=('himawari8/'+fname[:-4]).encode("utf-8"))
     
     
     ftp.quit()
