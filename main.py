@@ -1,7 +1,9 @@
 # [START gae_python37_app]
 
 from flask import Flask
+#from flask import render_template
 #from flask import send_file
+from flask import request
 
 from datetime import datetime
 from datetime import timedelta
@@ -76,27 +78,28 @@ def proc():
     actv_dates = [rnow - timedelta(seconds=600*i) for i in range(4)]
 
     for d in actv_dates:
-        fname = 'HS_H08_{}_B08_FLDK_R20_S0710.DAT.bz2'.format(d.strftime("%Y%m%d_%H%M"))
+        for band, res in [(1,10),(2,10),(3,5),(4,10)]:
+            for sec in [7,8,9]:
+
+                fname = f"HS_H08_{d.strftime('%Y%m%d_%H%M')}_B{band:02d}_FLDK_R{res:02d}_S{sec:02d}10.DAT.bz2"
     
-        blob = bucket.blob("himawari8/"+fname[:-4])
-        if blob.exists():
-            continue
-    
-        try:
-            ftp_dir = '/jma/hsd/{}/{}/{}/'.format(d.strftime("%Y%m"), d.strftime("%d"), d.strftime("%H"))
-            ftp.cwd(ftp_dir)
-            b = io.BytesIO()
-            ftp.retrbinary('RETR %s' % fname, b.write)
-            b.seek(0)
-            blob.upload_from_string(bz2.decompress(b.read()), content_type='application/binary')
-            b.close()
-            add_entry(datastore_client, d, fname[:-4])
-            #publisher.publish(topic, data=b'My awesome message.')
-        except:
-            continue
-        #msg = '{{"data":"{}", "publishTime": "{}"}}'.format(, d.isoformat("T") + "Z")
-        publisher.publish(topic, data=('himawari8/'+fname[:-4]).encode("utf-8"))
-    
+                blob = bucket.blob("himawari8/"+fname[:-4])
+                if blob.exists():
+                    continue
+                
+                try:
+                    ftp_dir = f"/jma/hsd/{d.strftime('%Y%m')}/{d.strftime('%d')}/{d.strftime('%H')}/"
+                    ftp.cwd(ftp_dir)
+                    b = io.BytesIO()
+                    ftp.retrbinary('RETR %s' % fname, b.write)
+                    b.seek(0)
+                    blob.upload_from_string(bz2.decompress(b.read()), content_type='application/binary')
+                    b.close()
+                    add_entry(datastore_client, d, fname[:-4])
+                except Exception as e:
+                    continue
+
+                publisher.publish(topic, data=('himawari8/'+fname[:-4]).encode("utf-8"))
     
     ftp.quit()
     
@@ -105,7 +108,7 @@ def proc():
     blob_names = sorted([blb.name for blb in blobs], reverse=True)
     blobs = bucket.list_blobs(prefix='himawari8')
     for blb in blobs:
-        if blb.name in blob_names[7:]:
+        if blb.name in blob_names[72:]:
             blb.delete()
 
     return 'ok'
@@ -115,9 +118,27 @@ def proc():
 def stats():
     query = datastore_client.query(kind='Image')
     query.order = ['im_start']
-    keys = list([dict(entity) for entity in query.fetch()])
+    data = list([dict(entity) for entity in query.fetch()])
 
-    return json.dumps(keys, indent=4, sort_keys=True, default=str)
+    return json.dumps(data, indent=4, sort_keys=True, default=str)
+
+@app.route('/image')
+def dashboard():
+    sector = int(request.args.get('sector'))
+    i = int(request.args.get('i'))
+    j = int(request.args.get('j'))
+
+    query = datastore_client.query(kind='Image')
+    query.order = ['im_start']
+    data = list([dict(entity) for entity in query.fetch()])
+
+    fname = None
+    for entry in data:
+        if entry['name'][-9:] == f"S{sector:02d}10.DAT":
+            fname = entry['name'][:-3] + "png"
+
+    #return render_template('dashboard.html', img_log=json.dumps(keys, indent=4, sort_keys=True, default=str))
+    return fname
 
 """
 @app.route('/show')
