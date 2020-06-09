@@ -26,6 +26,59 @@ type BandRes struct {
 	Res  int
 }
 
+func last(w http.ResponseWriter, r *http.Request) {
+	secs, ok := r.URL.Query()["sector"]
+
+	if !ok || len(secs[0]) < 1 {
+		http.Error(w, fmt.Sprintf("You need to provide a sector [7,8,9] parameter"), 400)
+		return
+	}
+
+	sec := secs[0]
+
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Cannot create storage client: %v", err), 400)
+		return
+	}
+	bkt := client.Bucket(os.Getenv("BUCKET_NAME"))
+
+	oName := ""
+
+	it := bkt.Objects(ctx, nil)
+	for {
+		objAttrs, err := it.Next()
+		if err != nil && err != iterator.Done {
+			http.Error(w, fmt.Sprintf("Error iterating though objects: %v", err), 400)
+			return
+		}
+		if err == iterator.Done {
+			break
+		}
+
+		ext := objAttrs.Name[len(objAttrs.Name)-9:]
+
+		if ext == fmt.Sprintf("S%s10.png", sec) {
+			oName = objAttrs.Name
+		}
+	}
+
+	rc, err := bkt.Object(oName).NewReader(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating reading for object: %v", err), 400)
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", "image/png")
+	if _, err := io.Copy(w, rc); err != nil {
+		http.Error(w, fmt.Sprintf("Error reading image: %v", err), 400)
+		return
+	}
+
+}
+
 func update(w http.ResponseWriter, r *http.Request) {
 	t := time.Now().UTC()
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), (t.Minute()/10)*10, 0, 0, time.UTC)
@@ -39,7 +92,7 @@ func update(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, fmt.Sprintf("Error retrieving image: %v", err), 400)
 					return
 				}
-				newIm = newIm || pub
+				pub = newIm || pub
 			}
 
 			// Publish topic if there is a new image in the previous loop
@@ -78,7 +131,7 @@ func getFile(t time.Time, band, res, sec int) (bool, error) {
 	_, err = obj.Attrs(ctx)
 
 	if err != storage.ErrObjectNotExist {
-		return false, nil
+		return false, err
 	}
 
 	// Create connection to FTP server
@@ -94,7 +147,8 @@ func getFile(t time.Time, band, res, sec int) (bool, error) {
 	dirName := fmt.Sprintf("/jma/hsd/%s/%s/%s/", t.Format("200601"), t.Format("02"), t.Format("15"))
 	r, err := c.Retr(dirName + fName)
 	if err != nil {
-		return false, err
+		//This error does not propagate: Non existing file most of the times
+		return false, nil
 	}
 	defer r.Close()
 
@@ -152,7 +206,14 @@ func cleanBucket() error {
 		if err == iterator.Done {
 			break
 		}
-		if time.Now().Add(-1 * time.Hour).After(objAttrs.Created) {
+
+		ext := objAttrs.Name[len(objAttrs.Name)-3:]
+		if ext == "DAT" && time.Now().Add(-1*time.Hour).After(objAttrs.Created) {
+			if err := bkt.Object(objAttrs.Name).Delete(ctx); err != nil {
+				return err
+			}
+		}
+		if ext == "png" && time.Now().Add(-24*time.Hour).After(objAttrs.Created) {
 			if err := bkt.Object(objAttrs.Name).Delete(ctx); err != nil {
 				return err
 			}
@@ -182,6 +243,7 @@ func publish(tString string) error {
 
 func main() {
 	//http.Handle("/", http.FileServer(http.Dir("./static")))
+	http.HandleFunc("/last", last)
 	http.HandleFunc("/update", update)
 	log.Fatal(http.ListenAndServe(":"+os.Getenv("PORT"), nil))
 }
