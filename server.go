@@ -26,57 +26,84 @@ type BandRes struct {
 	Res  int
 }
 
-func last(w http.ResponseWriter, r *http.Request) {
-	secs, ok := r.URL.Query()["sector"]
+//func writeImage(sec string, w http.ResponseWriter) <-chan bool {
+func writeImage(w http.ResponseWriter) <-chan bool {
+	out := make(chan bool)
 
-	if !ok || len(secs[0]) < 1 {
-		http.Error(w, fmt.Sprintf("You need to provide a sector [7,8,9] parameter"), 400)
-		return
-	}
-
-	sec := secs[0]
-
-	ctx := context.Background()
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Cannot create storage client: %v", err), 400)
-		return
-	}
-	bkt := client.Bucket(os.Getenv("BUCKET_NAME"))
-
-	oName := ""
-
-	it := bkt.Objects(ctx, nil)
-	for {
-		objAttrs, err := it.Next()
-		if err != nil && err != iterator.Done {
-			http.Error(w, fmt.Sprintf("Error iterating though objects: %v", err), 400)
+	go func() {
+		ctx := context.Background()
+		client, err := storage.NewClient(ctx)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Cannot create storage client: %v", err), 400)
 			return
 		}
-		if err == iterator.Done {
-			break
-		}
+		bkt := client.Bucket(os.Getenv("BUCKET_NAME"))
 
-		ext := objAttrs.Name[len(objAttrs.Name)-9:]
+		oName := ""
 
-		if ext == fmt.Sprintf("S%s10.png", sec) {
+		query := &storage.Query{Prefix: "himawari8/H08_AUSW"}
+		it := bkt.Objects(ctx, query)
+		for {
+			objAttrs, err := it.Next()
+			if err != nil && err != iterator.Done {
+				http.Error(w, fmt.Sprintf("Error iterating though objects: %v", err), 400)
+				return
+			}
+			if err == iterator.Done {
+				break
+			}
+			/*
+				ext := objAttrs.Name[len(objAttrs.Name)-9:]
+
+				if ext == fmt.Sprintf("S%s10.png", sec) {
+					oName = objAttrs.Name
+				}
+			*/
 			oName = objAttrs.Name
 		}
-	}
 
-	rc, err := bkt.Object(oName).NewReader(ctx)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating reading for object: %v", err), 400)
-		return
-	}
-	defer rc.Close()
+		if oName == "" {
+			http.Error(w, fmt.Sprintf("No object has been found"), 400)
+			return
+		}
 
-	w.Header().Set("Content-Type", "image/png")
-	if _, err := io.Copy(w, rc); err != nil {
-		http.Error(w, fmt.Sprintf("Error reading image: %v", err), 400)
-		return
-	}
+		rc, err := bkt.Object(oName).NewReader(ctx)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error creating object reader: %v", err), 400)
+			return
+		}
+		defer rc.Close()
 
+		w.Header().Set("Content-Type", "image/png")
+		buf := make([]byte, 4096)
+		if _, err := io.CopyBuffer(w, rc, buf); err != nil {
+			http.Error(w, fmt.Sprintf("Error reading image: %v", err), 400)
+			return
+		}
+		out <- true
+		close(out)
+	}()
+	return out
+}
+
+func last(w http.ResponseWriter, r *http.Request) {
+	/*
+		secs, ok := r.URL.Query()["sector"]
+		if !ok || len(secs[0]) < 1 {
+			http.Error(w, fmt.Sprintf("You need to provide a sector [7,8,9] parameter"), 400)
+			return
+		}
+		sec := secs[0]
+	*/
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	select {
+	//case <-writeImage(sec, w):
+	case <-writeImage(w):
+	case <-ctx.Done():
+		http.Error(w, fmt.Sprintf("Request timeout"), 408)
+	}
 }
 
 func update(w http.ResponseWriter, r *http.Request) {
