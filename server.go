@@ -111,7 +111,8 @@ func update(w http.ResponseWriter, r *http.Request) {
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), (t.Minute()/10)*10, 0, 0, time.UTC)
 
 	for i := 0; i < 4; i++ {
-		for _, sec := range []int{7, 8, 9} {
+		//for _, sec := range []int{7, 8, 9} {
+		for _, sec := range []int{9} {
 			pub := false
 			for _, br := range []BandRes{{1, 10}, {2, 10}, {3, 5}, {4, 10}} {
 				newIm, err := getFile(t, br.Band, br.Res, sec)
@@ -266,6 +267,26 @@ func publish(tString string) error {
 		return err
 	}
 	return nil
+}
+
+func stats(w http.ResponseWriter, r *http.Request) {
+	/*
+		secs, ok := r.URL.Query()["sector"]
+		if !ok || len(secs[0]) < 1 {
+			http.Error(w, fmt.Sprintf("You need to provide a sector [7,8,9] parameter"), 400)
+			return
+		}
+		sec := secs[0]
+	*/
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	select {
+	//case <-writeImage(sec, w):
+	case <-writeImage(w):
+	case <-ctx.Done():
+		http.Error(w, fmt.Sprintf("Request timeout"), 408)
+	}
 }
 
 func main() {
